@@ -10,7 +10,7 @@
   "last_opened" : 1776414105826,
   "symdev_account_email" : null,
   "llm_account_email" : "yakupgoldstone@gmail.com",
-  "github_repo_url" : null,
+  "github_repo_url" : "https://github.com/YakupAltintas/Proccesing2DEditor",
   "build_command" : "rmdir /S /Q target 2>nul & mkdir target & javac -encoding UTF-8 -d target src\\Main.java",
   "run_command" : "java -cp target Main",
   "open_browser_url" : null
