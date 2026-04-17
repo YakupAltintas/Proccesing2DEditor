@@ -135,8 +135,39 @@ public class SolarSystem extends PApplet {
         if (rotPeriod != 0) rotateY(masterTime * (365.0f / rotPeriod));
         scale(localScale == 0 ? 1.0f : localScale);
         
-        noStroke(); fill(col);
-        sphere(size);
+        noStroke();
+        if (name.equals("SUN")) {
+            // --- Advanced Sun Visuals ---
+            float pulse = sin(frameCount * 0.05f) * 2.0f;
+            // 1. Core (Ultra bright)
+            emissive(255, 255, 200);
+            fill(255, 255, 240);
+            sphere(size + pulse);
+            
+            // 2. Plasma/Corona Layers (Boiling effect)
+            for (int i = 0; i < 3; i++) {
+                pushMatrix();
+                rotateX(frameCount * 0.01f * (i + 1));
+                rotateZ(frameCount * 0.007f * (i + 1));
+                float nS = 1.0f + 0.15f * noise(frameCount * 0.02f, i * 50);
+                fill(255, 120 + i * 40, 0, 50 - i * 15);
+                sphere((size + 5) * nS + (i * 12));
+                popMatrix();
+            }
+            
+            // 3. Solar Rays
+            strokeWeight(2);
+            for (int i = 0; i < 16; i++) {
+                float rAngle = TWO_PI / 16 * i + (frameCount * 0.005f);
+                float rayLen = size * 1.8f + 40 * noise(i, frameCount * 0.03f);
+                stroke(255, 180, 0, 80);
+                line(0, 0, 0, cos(rAngle) * rayLen, sin(rAngle * 0.5f) * rayLen, sin(rAngle) * rayLen);
+            }
+            emissive(0);
+        } else {
+            fill(col);
+            sphere(size);
+        }
         
         if (selectedPlanet.equals(name)) {
             noFill(); stroke(255, 255, 0); strokeWeight(2); box(size * 2.5f);
