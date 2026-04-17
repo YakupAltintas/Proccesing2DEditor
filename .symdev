@@ -1,0 +1,17 @@
+{
+  "project_id" : 1796,
+  "project_name" : "2dEditor",
+  "language" : "JAVA",
+  "ai_chat_id" : "1_vy-1DcXilkYtLmPJEkfBL0kSqPvLaiI",
+  "active_llm_provider" : "gemini",
+  "ai_chat_sessions" : {
+    "gemini" : "1_vy-1DcXilkYtLmPJEkfBL0kSqPvLaiI"
+  },
+  "last_opened" : 1776414105826,
+  "symdev_account_email" : null,
+  "llm_account_email" : "yakupgoldstone@gmail.com",
+  "github_repo_url" : null,
+  "build_command" : "rmdir /S /Q target 2>nul & mkdir target & javac -encoding UTF-8 -d target src\\Main.java",
+  "run_command" : "java -cp target Main",
+  "open_browser_url" : null
+}
