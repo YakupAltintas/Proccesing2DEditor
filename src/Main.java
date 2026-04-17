@@ -1,242 +1,232 @@
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
-import java.awt.geom.*;
+import processing.core.*;
+import processing.opengl.*;
 import java.util.*;
-import java.util.List;
 
-public class Main extends JPanel {
-    private float earthAngle = 0, moonAngle = 0, marsAngle = 0, jupiterAngle = 0, saturnAngle = 0, rayAngle = 0;
-    private float globalScale = 1.0f;
-    private boolean paused = false;
-    private long lastTime = System.nanoTime();
-    private int fps = 0, frameCount = 0;
+public class Main extends PApplet {
+    // --- Camera & View State ---
+    float camRotX = PI/4, camRotY = PI/4, camDist = 1200;
+    float earthAngle = 0, moonAngle = 0, marsAngle = 0, jupiterAngle = 0, saturnAngle = 0;
+    boolean paused = false;
 
-    private final int[] starX = new int[200], starY = new int[200];
-    private final Map<String, LinkedList<Point>> trails = new HashMap<>();
-    private final Map<String, Point2D> positions = new HashMap<>();
-    private final Map<String, Integer> sizes = new HashMap<>();
-    private final String[] planetNames = {"SUN", "EARTH", "MARS", "JUPITER", "SATURN"};
-    private String selectedPlanet = "NONE";
-
-    private static class PlanetState {
-        double distOffset = 0, angleOffset = 0, rot = 0, scale = 1.0;
+    // --- Data Structures ---
+    class PlanetState {
+        float distOffset = 0, angleOffset = 0, rot = 0, scale = 1.0f;
         PlanetState copy() {
             PlanetState s = new PlanetState();
-            s.distOffset = distOffset; s.angleOffset = angleOffset; s.rot = rot; s.scale = scale;
+            s.distOffset = distOffset; s.angleOffset = angleOffset;
+            s.rot = rot; s.scale = scale;
             return s;
         }
     }
-    private Map<String, PlanetState> planetStates = new HashMap<>();
-    private Deque<Map<String, PlanetState>> undoStack = new ArrayDeque<>();
 
-    public Main() {
-        setBackground(Color.BLACK);
-        setFocusable(true);
-        Random rand = new Random();
+    Map<String, PlanetState> planetStates = new HashMap<>();
+    Deque<Map<String, PlanetState>> undoStack = new ArrayDeque<>();
+    String selectedPlanet = "NONE";
+    Map<String, PVector> screenPos = new HashMap<>();
 
-        for (int i = 0; i < 200; i++) { starX[i] = rand.nextInt(1200); starY[i] = rand.nextInt(1200); }
-        for (String n : planetNames) {
+    // --- Visuals ---
+    float[][] stars = new float[500][3];
+
+    public void settings() {
+        size(1200, 800, P3D);
+    }
+
+    public void setup() {
+        String[] names = {"SUN", "EARTH", "MARS", "JUPITER", "SATURN"};
+        for (String n : names) {
             planetStates.put(n, new PlanetState());
-            trails.put(n, new LinkedList<>());
-            positions.put(n, new Point2D.Double(0,0));
+            screenPos.put(n, new PVector());
         }
-        sizes.put("SUN", 60); sizes.put("EARTH", 30); sizes.put("MARS", 20); sizes.put("JUPITER", 55); sizes.put("SATURN", 45);
 
-        addMouseListener(new MouseAdapter() {
-            @Override
-            public void mousePressed(MouseEvent e) {
-                requestFocusInWindow();
-                selectedPlanet = "NONE";
-                double closest = Double.MAX_VALUE;
-                for (String name : planetNames) {
-                    double d = e.getPoint().distance(positions.get(name));
-                    double r = (sizes.get(name) * planetStates.get(name).scale * globalScale / 2.0) + 15;
-                    if (d < r && d < closest) { selectedPlanet = name; closest = d; }
-                }
-            }
-        });
-
-        addMouseWheelListener(e -> {
-            double zoomFactor = Math.pow(1.1, -e.getPreciseWheelRotation());
-            globalScale *= zoomFactor;
-            globalScale = Math.max(0.1f, Math.min(globalScale, 5.0f)); // Zoom limitleri
-            repaint();
-        });
-
-        addKeyListener(new KeyAdapter() {
-            @Override
-            public void keyPressed(KeyEvent e) {
-                if (e.getKeyCode() == KeyEvent.VK_SPACE) paused = !paused;
-                if (e.getKeyCode() == KeyEvent.VK_U) undo();
-                if (selectedPlanet.equals("NONE")) return;
-                saveState();
-                PlanetState s = planetStates.get(selectedPlanet);
-                switch (e.getKeyCode()) {
-                    case KeyEvent.VK_UP -> s.distOffset -= 5; case KeyEvent.VK_DOWN -> s.distOffset += 5;
-                    case KeyEvent.VK_LEFT -> s.angleOffset -= 0.05; case KeyEvent.VK_RIGHT -> s.angleOffset += 0.05;
-                    case KeyEvent.VK_A -> s.rot -= 0.1; case KeyEvent.VK_D -> s.rot += 0.1;
-                    case KeyEvent.VK_W -> s.scale += 0.05; case KeyEvent.VK_S -> s.scale = Math.max(0.1, s.scale - 0.05);
-                }
-            }
-        });
-
-        new javax.swing.Timer(16, e -> {
-            if (!paused) {
-                earthAngle += 0.015f; moonAngle += 0.06f; marsAngle += 0.012f;
-                jupiterAngle += 0.006f; saturnAngle += 0.004f; rayAngle += 0.01f;
-                updateTrails();
-            }
-            updateFPS(); repaint();
-        }).start();
+        // Distant 3D Stars
+        for (int i = 0; i < 500; i++) {
+            float r = random(4000, 8000);
+            float theta = random(TWO_PI);
+            float phi = random(PI);
+            stars[i][0] = r * sin(phi) * cos(theta);
+            stars[i][1] = r * sin(phi) * sin(theta);
+            stars[i][2] = r * cos(phi);
+        }
     }
 
-    private void updateTrails() {
-        positions.forEach((name, p) -> {
-            if (!name.equals("SUN")) {
-                LinkedList<Point> t = trails.get(name);
-                t.addFirst(new Point((int)p.getX(), (int)p.getY()));
-                if (t.size() > 40) t.removeLast();
+    public void draw() {
+        background(5, 5, 15);
+
+        // 1. Setup 3D Scene
+        pushMatrix();
+        translate(width/2, height/2, 0);
+        
+        // Orbit Camera Controls
+        if (mousePressed && mouseButton == LEFT) {
+            camRotY += (mouseX - pmouseX) * 0.01f;
+            camRotX -= (mouseY - pmouseY) * 0.01f;
+        }
+        rotateX(camRotX);
+        rotateY(camRotY);
+        translate(0, 0, -camDist + 1200);
+
+        // Lights
+        ambientLight(40, 40, 60);
+        pointLight(255, 230, 180, 0, 0, 0); // Sun light source
+
+        // 2. Draw Stars (Deep Space)
+        stroke(255);
+        strokeWeight(2);
+        for (int i = 0; i < 500; i++) point(stars[i][0], stars[i][1], stars[i][2]);
+        noStroke();
+
+        // 3. Draw Solar System
+        drawPlanet("SUN", 0, 0, 60, color(255, 220, 0));
+        drawPlanet("EARTH", 250, earthAngle, 30, color(50, 120, 255));
+        drawPlanet("MARS", 350, marsAngle, 22, color(230, 80, 40));
+        drawPlanet("JUPITER", 500, jupiterAngle, 65, color(200, 170, 130));
+        drawPlanet("SATURN", 700, saturnAngle, 55, color(220, 200, 150));
+
+        popMatrix();
+
+        // 4. UI Overlay
+        drawUI();
+
+        if (!paused) {
+            earthAngle += 0.01f; moonAngle += 0.04f; marsAngle += 0.008f;
+            jupiterAngle += 0.004f; saturnAngle += 0.003f;
+        }
+    }
+
+    void drawPlanet(String name, float baseR, float angle, float size, int col) {
+        PlanetState s = planetStates.get(name);
+        float r = baseR + s.distOffset;
+        float curAngle = angle + s.angleOffset;
+
+        // Draw Orbit Line (XZ Plane)
+        if (baseR > 0) {
+            noFill(); stroke(255, 50); strokeWeight(1);
+            beginShape();
+            for (float a = 0; a < TWO_PI; a += 0.1) vertex(cos(a)*r, 0, sin(a)*r);
+            endShape(CLOSE);
+        }
+
+        // Trig Position (XZ Plane)
+        float x = cos(curAngle) * r;
+        float z = sin(curAngle) * r;
+        float y = 0;
+
+        // Capture Screen Pos for Picking
+        screenPos.get(name).set(screenX(x, y, z), screenY(x, y, z), screenZ(x, y, z));
+
+        pushMatrix();
+        translate(x, y, z);
+        
+        // Local Rotation & Scale
+        rotateY(s.rot);
+        scale(s.scale);
+
+        // Body
+        fill(col);
+        noStroke();
+        sphere(size/2);
+
+        // Saturn Rings
+        if (name.equals("SATURN")) {
+            noFill(); stroke(200, 150, 100, 150); strokeWeight(4);
+            rotateX(PI/2.5f);
+            ellipse(0, 0, size * 2.5f, size * 2.2f);
+        } 
+        // Earth Moon
+        else if (name.equals("EARTH")) {
+            pushMatrix();
+            rotateY(moonAngle);
+            translate(50, 0, 0);
+            fill(180);
+            sphere(6);
+            popMatrix();
+        }
+
+        popMatrix();
+
+        // Selection Highlight
+        if (selectedPlanet.equals(name)) {
+            noFill(); stroke(255, 255, 0); strokeWeight(2);
+            pushMatrix();
+            translate(x, y, z);
+            box(size + 10);
+            popMatrix();
+        }
+    }
+
+    void drawUI() {
+        hint(DISABLE_DEPTH_TEST);
+        camera(); // Reset matrix to 2D screen space
+        noLights();
+        
+        fill(0, 180);
+        rect(10, 10, 300, 150);
+        fill(255);
+        textSize(14);
+        text("FPS: " + (int)frameRate, 20, 35);
+        text("SELECTED: " + selectedPlanet, 20, 55);
+        
+        if (!selectedPlanet.equals("NONE")) {
+            PlanetState s = planetStates.get(selectedPlanet);
+            text(String.format("Scale: %.2f | Rot: %.2f", s.scale, s.rot), 20, 75);
+            text("3D Homogeneous Matrix Active", 20, 95);
+        }
+        
+        text("Drag: Orbit | Scroll: Zoom", 20, 125);
+        text("SPACE: Pause | U: Undo | Arrows: Offset", 20, 145);
+
+        hint(ENABLE_DEPTH_TEST);
+    }
+
+    public void mouseWheel(MouseEvent event) {
+        camDist += event.getCount() * 30;
+        camDist = constrain(camDist, 200, 4000);
+    }
+
+    public void mousePressed() {
+        selectedPlanet = "NONE";
+        float closestZ = Float.MAX_VALUE;
+        for (String name : planetNames) {
+            PVector p = screenPos.get(name);
+            float d = dist(mouseX, mouseY, p.x, p.y);
+            if (d < 40 && p.z < closestZ) {
+                selectedPlanet = name;
+                closestZ = p.z;
             }
-        });
+        }
     }
 
-    private void updateFPS() {
-        frameCount++; long now = System.nanoTime();
-        if (now - lastTime >= 1_000_000_000L) { fps = frameCount; frameCount = 0; lastTime = now; }
+    public void keyPressed() {
+        if (key == ' ') paused = !paused;
+        if (key == 'u' || key == 'U') undo();
+        
+        if (selectedPlanet.equals("NONE")) return;
+        saveState();
+        PlanetState s = planetStates.get(selectedPlanet);
+        if (keyCode == UP) s.distOffset -= 10;
+        if (keyCode == DOWN) s.distOffset += 10;
+        if (keyCode == LEFT) s.angleOffset -= 0.1f;
+        if (keyCode == RIGHT) s.angleOffset += 0.1f;
+        if (key == 'a' || key == 'A') s.rot -= 0.1f;
+        if (key == 'd' || key == 'D') s.rot += 0.1f;
+        if (key == 'w' || key == 'W') s.scale += 0.1f;
+        if (key == 's' || key == 'S') s.scale = max(0.1f, s.scale - 0.1f);
     }
 
-    private void saveState() {
+    void saveState() {
         Map<String, PlanetState> snap = new HashMap<>();
-        planetStates.forEach((k, v) -> snap.put(k, v.copy()));
+        for (String k : planetStates.keySet()) snap.put(k, planetStates.get(k).copy());
         undoStack.push(snap);
         if (undoStack.size() > 10) undoStack.removeLast();
     }
 
-    private void undo() { if (!undoStack.isEmpty()) { planetStates = undoStack.pop(); repaint(); } }
-
-    @Override
-    protected void paintComponent(Graphics g) {
-        super.paintComponent(g);
-        Graphics2D g2d = (Graphics2D) g;
-        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-
-        float cx = getWidth() / 2.0f;
-        float cy = getHeight() / 2.0f;
-
-        AffineTransform viewTransform = g2d.getTransform();
-        
-        // Zoom ve Pan (Merkez odaklı)
-        g2d.translate(cx, cy);
-        g2d.scale(globalScale, globalScale);
-        g2d.translate(-cx, -cy);
-
-        drawNebula(g2d);
-        g2d.setColor(Color.WHITE);
-        for (int i = 0; i < 200; i++) g2d.fillOval(starX[i], starY[i], 2, 2);
-
-        drawAllTrails(g2d);
-        drawSolarRays(g2d, cx, cy);
-
-        drawPlanet(g2d, cx, cy, 0, 0, "SUN", Color.YELLOW);
-        drawPlanet(g2d, cx, cy, 180, earthAngle, "EARTH", new Color(50, 150, 255));
-        drawPlanet(g2d, cx, cy, 280, marsAngle, "MARS", new Color(255, 80, 30));
-        drawPlanet(g2d, cx, cy, 380, jupiterAngle, "JUPITER", new Color(200, 160, 120));
-        drawPlanet(g2d, cx, cy, 480, saturnAngle, "SATURN", new Color(230, 200, 150));
-
-        g2d.setTransform(viewTransform); // Panelleri etkilememesi için geri yükle
-
-        drawPanels(g2d);
+    void undo() {
+        if (!undoStack.isEmpty()) planetStates = undoStack.pop();
     }
 
-    private void drawPlanet(Graphics2D g2d, float cx, float cy, float baseDist, float orbitAngle, String name, Color color) {
-        PlanetState s = planetStates.get(name);
-        float r = (float)(baseDist + s.distOffset);
-        float angle = (float)(orbitAngle + s.angleOffset);
-
-        if (baseDist > 0) {
-            g2d.setColor(new Color(255, 255, 255, 60));
-            g2d.setStroke(new BasicStroke(1, BasicStroke.CAP_BUTT, BasicStroke.JOIN_BEVEL, 0, new float[]{5}, 0));
-            g2d.draw(new Ellipse2D.Float(cx - r, cy - r, r * 2, r * 2));
-        }
-
-        float px = cx + (float)Math.cos(angle) * r;
-        float py = cy + (float)Math.sin(angle) * r;
-        positions.put(name, new Point2D.Float(px, py));
-
-        AffineTransform old = g2d.getTransform();
-        g2d.translate(px, py);
-        g2d.rotate(s.rot);
-        g2d.scale(s.scale, s.scale);
-
-        int size = sizes.get(name);
-        for (int i = 0; i < 3; i++) {
-            g2d.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 40 - i*10));
-            float gs = size + 10 + i*15;
-            g2d.fill(new Ellipse2D.Float(-gs/2, -gs/2, gs, gs));
-        }
-        g2d.setColor(color);
-        g2d.fill(new Ellipse2D.Float(-size/2.0f, -size/2.0f, size, size));
-
-        if (name.equals("SATURN")) {
-            g2d.setColor(new Color(255, 255, 255, 100));
-            g2d.draw(new Ellipse2D.Float(-size, -size/4.0f, size*2, size/2.0f));
-        } else if (name.equals("EARTH")) {
-            float mx = (float)Math.cos(moonAngle) * 45;
-            float my = (float)Math.sin(moonAngle) * 45;
-            g2d.setColor(Color.LIGHT_GRAY);
-            g2d.fill(new Ellipse2D.Float(mx-6, my-6, 12, 12));
-        }
-
-        g2d.setTransform(old);
-
-        if (selectedPlanet.equals(name)) {
-            g2d.setColor(Color.YELLOW); g2d.setStroke(new BasicStroke(2));
-            float ss = (float)(size * s.scale + 20);
-            g2d.draw(new Ellipse2D.Float(px - ss/2, py - ss/2, ss, ss));
-        }
-    }
-
-    private void drawNebula(Graphics2D g2d) {
-        Color[] c = {new Color(80, 0, 120, 15), new Color(0, 40, 100, 10), new Color(100, 40, 0, 10)};
-        g2d.setColor(c[0]); g2d.fillOval(50, 50, 600, 400);
-        g2d.setColor(c[1]); g2d.fillOval(getWidth()-500, getHeight()-400, 500, 400);
-    }
-
-    private void drawSolarRays(Graphics2D g2d, float x, float y) {
-        g2d.setColor(new Color(255, 255, 200, 20));
-        AffineTransform old = g2d.getTransform();
-        g2d.translate(x, y); g2d.rotate(rayAngle);
-        for (int i = 0; i < 16; i++) { g2d.rotate(Math.PI/8); g2d.drawLine(0, 0, 0, 1500); }
-        g2d.setTransform(old);
-    }
-
-    private void drawAllTrails(Graphics2D g2d) {
-        trails.forEach((name, list) -> {
-            int a = 140; for (Point p : list) {
-                g2d.setColor(new Color(255, 255, 255, a));
-                g2d.fillOval(p.x, p.y, 2, 2); a = Math.max(0, a - 4);
-            }
-        });
-    }
-
-    private void drawPanels(Graphics2D g2d) {
-        g2d.setFont(new Font("Monospaced", Font.BOLD, 12));
-        g2d.setColor(new Color(0, 0, 0, 210)); g2d.fillRect(10, 10, 280, 120);
-        g2d.setColor(Color.WHITE); g2d.drawRect(10, 10, 280, 120);
-        g2d.drawString("FPS: " + fps + " | SELECTED: " + selectedPlanet, 20, 30);
-        if (!selectedPlanet.equals("NONE")) {
-            Point2D p = positions.get(selectedPlanet); PlanetState s = planetStates.get(selectedPlanet);
-            g2d.drawString(String.format("POS: [%.0f, %.0f]", p.getX(), p.getY()), 20, 55);
-            g2d.drawString(String.format("DIST_OFF: %.1f | ANG_OFF: %.2f", s.distOffset, s.angleOffset), 20, 75);
-            g2d.drawString(String.format("ROT: %.2f | SCALE: %.2f", s.rot, s.scale), 20, 95);
-        }
-    }
+    private final String[] planetNames = {"SUN", "EARTH", "MARS", "JUPITER", "SATURN"};
 
     public static void main(String[] args) {
-        JFrame f = new JFrame("SymDev - Solar System Fixed v2.2");
-        f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        f.setSize(1000, 1000); f.add(new Main());
-        f.setLocationRelativeTo(null); f.setVisible(true);
+        PApplet.main("Main");
     }
 }

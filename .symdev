@@ -11,7 +11,7 @@
   "symdev_account_email" : null,
   "llm_account_email" : "yakupgoldstone@gmail.com",
   "github_repo_url" : "https://github.com/YakupAltintas/Proccesing2DEditor",
-  "build_command" : "rmdir /S /Q target 2>nul & mkdir target & javac -encoding UTF-8 -d target src\\Main.java",
-  "run_command" : "java -cp target Main",
+  "build_command" : "mvn clean package",
+  "run_command" : "java -jar target/2dEditor-1.0-SNAPSHOT.jar",
   "open_browser_url" : null
 }
