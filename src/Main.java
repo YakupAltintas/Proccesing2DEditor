@@ -7,6 +7,7 @@ import java.util.List;
 
 public class Main extends JPanel {
     private float earthAngle = 0, moonAngle = 0, marsAngle = 0, jupiterAngle = 0, saturnAngle = 0, rayAngle = 0;
+    private float globalScale = 1.0f;
     private boolean paused = false;
     private long lastTime = System.nanoTime();
     private int fps = 0, frameCount = 0;
@@ -50,10 +51,17 @@ public class Main extends JPanel {
                 double closest = Double.MAX_VALUE;
                 for (String name : planetNames) {
                     double d = e.getPoint().distance(positions.get(name));
-                    double r = (sizes.get(name) * planetStates.get(name).scale / 2.0) + 15;
+                    double r = (sizes.get(name) * planetStates.get(name).scale * globalScale / 2.0) + 15;
                     if (d < r && d < closest) { selectedPlanet = name; closest = d; }
                 }
             }
+        });
+
+        addMouseWheelListener(e -> {
+            double zoomFactor = Math.pow(1.1, -e.getPreciseWheelRotation());
+            globalScale *= zoomFactor;
+            globalScale = Math.max(0.1f, Math.min(globalScale, 5.0f)); // Zoom limitleri
+            repaint();
         });
 
         addKeyListener(new KeyAdapter() {
@@ -116,6 +124,13 @@ public class Main extends JPanel {
         float cx = getWidth() / 2.0f;
         float cy = getHeight() / 2.0f;
 
+        AffineTransform viewTransform = g2d.getTransform();
+        
+        // Zoom ve Pan (Merkez odaklı)
+        g2d.translate(cx, cy);
+        g2d.scale(globalScale, globalScale);
+        g2d.translate(-cx, -cy);
+
         drawNebula(g2d);
         g2d.setColor(Color.WHITE);
         for (int i = 0; i < 200; i++) g2d.fillOval(starX[i], starY[i], 2, 2);
@@ -128,6 +143,8 @@ public class Main extends JPanel {
         drawPlanet(g2d, cx, cy, 280, marsAngle, "MARS", new Color(255, 80, 30));
         drawPlanet(g2d, cx, cy, 380, jupiterAngle, "JUPITER", new Color(200, 160, 120));
         drawPlanet(g2d, cx, cy, 480, saturnAngle, "SATURN", new Color(230, 200, 150));
+
+        g2d.setTransform(viewTransform); // Panelleri etkilememesi için geri yükle
 
         drawPanels(g2d);
     }
