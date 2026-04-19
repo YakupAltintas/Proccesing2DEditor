@@ -3,226 +3,314 @@ import processing.event.MouseEvent;
 import java.util.*;
 
 public class SolarSystem extends PApplet {
-    // --- Simulasyon Zaman Ayarı (1 sn = 30 gün) ---
-    float timeStep = (30.0f / 365.0f) * TWO_PI / 60.0f;
-    float masterTime = 0;
-    boolean paused = false;
-
-    // --- Kamera ve Görünüm ---
-    float camRotX = PI/3, camRotY = PI/4, camDist = 1400;
+    Camera cam;
+    TimeSystem time;
+    Planet[] planets = new Planet[8];
+    ArrayList<Asteroid> belt = new ArrayList<>();
+    float[][] stars = new float[600][4];
+    boolean showGrid = true;
     
-    // --- Veri Yapıları ---
-    static class PlanetState {
-        float distOffset = 0, angleOffset = 0, rot = 0, scale = 1.0f;
-        PlanetState copy() {
-            PlanetState s = new PlanetState();
-            s.distOffset = distOffset; s.angleOffset = angleOffset;
-            s.rot = rot; s.scale = scale;
-            return s;
-        }
-    }
-    Map<String, PlanetState> planetStates = new HashMap<>();
-    Deque<Map<String, PlanetState>> undoStack = new ArrayDeque<>();
-    String selectedPlanet = "NONE";
-    Map<String, PVector> screenPosMap = new HashMap<>();
-    float[][] stars = new float[500][3];
+    // Seçim ve Görselleştirme
+    Object selectedBody = null; 
+    float sunSX, sunSY, sunSR = 60;
+    boolean isDraggingSlider = false;
 
-    // --- ASTRONOMIK SABITLER (Dunya=1 Ref) ---
-    // Boyutlar (Yarıçap px)
-    final float R_SUN = 60.0f, R_MERCURY = 3.0f, R_VENUS = 8.0f, R_EARTH = 8.0f, R_MARS = 4.0f;
-    final float R_JUPITER = 40.0f, R_SATURN = 34.0f, R_URANUS = 16.0f, R_NEPTUNE = 15.0f;
-    // Yörünge Uzaklıkları (px)
-    final float D_MERCURY = 39, D_VENUS = 72, D_EARTH = 100, D_MARS = 152, D_JUPITER = 280, D_SATURN = 380, D_URANUS = 480, D_NEPTUNE = 580;
-    // Yörünge Hız Çarpanları (1/Period)
-    final float S_MERCURY = 4.15f, S_VENUS = 1.62f, S_EARTH = 1.0f, S_MARS = 0.53f, S_JUPITER = 0.084f, S_SATURN = 0.034f, S_URANUS = 0.012f, S_NEPTUNE = 0.006f;
-    // Eksen Eğiklikleri (Derece -> Radyan)
-    final float I_MERCURY = radians(7.0f), I_VENUS = radians(3.4f), I_EARTH = 0, I_MARS = radians(1.85f), I_JUPITER = radians(1.3f), I_SATURN = radians(2.49f), I_URANUS = radians(0.77f), I_NEPTUNE = radians(1.77f);
+    // UI Renkleri
+    int uiBG = color(10, 10, 25, 230);
+    int uiBorder = color(50, 100, 200, 180);
+    int uiText = color(220, 230, 255);
+    int accent = color(0, 180, 255);
 
-    public void settings() { size(1200, 800, P3D); }
+    public void settings() { size(1200, 800, P3D); smooth(8); }
 
     public void setup() {
-        String[] names = {"SUN", "MERCURY", "VENUS", "EARTH", "MARS", "JUPITER", "SATURN", "URANUS", "NEPTUNE"};
-        for (String n : names) {
-            planetStates.put(n, new PlanetState());
-            screenPosMap.put(n, new PVector());
-        }
-        for (int i = 0; i < 500; i++) {
-            float r = random(4000, 9000); float theta = random(TWO_PI); float phi = random(PI);
-            stars[i][0] = r * sin(phi) * cos(theta); stars[i][1] = r * sin(phi) * sin(theta); stars[i][2] = r * cos(phi);
+        cam = new Camera();
+        time = new TimeSystem();
+        
+        // Gezegen Verileri (isim, yörünge, boyut, renk, hız, eğim, uydusayısı, gerçekVeriler...)
+        planets[0] = new Planet("Merkür", 100, 6, 0xFFA9A9A9, 0.0408f, 0.122f, 0, "57.9M", "4,879", "88");
+        planets[1] = new Planet("Venüs",  150, 9, 0xFFFFF0B4, 0.0162f, 0.059f, 0, "108.2M", "12,104", "224.7");
+        planets[2] = new Planet("Dünya",  210, 8, 0xFF4682B4, 0.0100f, 0.000f, 1, "149.6M", "12,742", "365.2");
+        planets[3] = new Planet("Mars",   270, 5, 0xFFBC4A3C, 0.0053f, 0.032f, 2, "227.9M", "6,779", "687");
+        planets[4] = new Planet("Jüpiter",390, 35, 0xFFC8A064, 0.0008f, 0.023f, 4, "778.6M", "139,820", "4,333");
+        planets[5] = new Planet("Satürn", 490, 28, 0xFFD2B464, 0.0003f, 0.043f, 1, "1.4B", "116,460", "10,759");
+        planets[6] = new Planet("Uranüs", 570, 16, 0xFF64C8D2, 0.0001f, 0.013f, 1, "2.9B", "50,724", "30,687");
+        planets[7] = new Planet("Neptün", 640, 15, 0xFF3264C8, 0.00006f, 0.031f, 1, "4.5B", "49,244", "60,190");
+
+        // Başlangıç Açıları
+        for(int i=0; i<8; i++) planets[i].angle = i * 1.5f;
+
+        // Uydular
+        planets[2].moons[0] = new Moon("Ay", 22, 2, 0xFFC8C8C8, 0.037f);
+        planets[3].moons[0] = new Moon("Phobos", 12, 1, 0xFF967850, 0.316f);
+        planets[3].moons[1] = new Moon("Deimos", 18, 1, 0xFF8C7864, 0.080f);
+        planets[4].moons[0] = new Moon("Io", 55, 2, 0xFFFFDC64, 0.056f);
+        planets[4].moons[1] = new Moon("Europa", 70, 2, 0xFFD2B48C, 0.028f);
+        planets[4].moons[2] = new Moon("Ganymede", 90, 3, 0xFFB4A082, 0.014f);
+        planets[4].moons[3] = new Moon("Callisto", 110, 3, 0xFF78645A, 0.006f);
+        planets[5].moons[0] = new Moon("Titan", 60, 3, 0xFFD2AA50, 0.006f);
+        planets[6].moons[0] = new Moon("Titania", 40, 1, 0xFFB4B4BE, 0.011f);
+        planets[7].moons[0] = new Moon("Triton", 28, 2, 0xFF96C8D2, -0.017f);
+
+        for(int i=0; i<300; i++) belt.add(new Asteroid());
+        for (int i = 0; i < 600; i++) {
+            stars[i][0] = random(-10000, 10000); stars[i][1] = random(-10000, 10000);
+            stars[i][2] = random(-10000, 10000); stars[i][3] = random(100, 255);
         }
     }
 
     public void draw() {
-        background(3, 3, 10);
-        
-        // Kamera Setup
-        float eyeX = camDist * sin(camRotX) * cos(camRotY);
-        float eyeY = camDist * cos(camRotX);
-        float eyeZ = camDist * sin(camRotX) * sin(camRotY);
-        camera(eyeX, eyeY, eyeZ, 0, 0, 0, 0, 1, 0);
-        perspective(PI/3.0f, (float)width/height, 1, 20000);
+        background(3, 3, 12);
+        time.update();
+        cam.update();
 
-        // Yıldızlar
-        stroke(255, 180); strokeWeight(2);
-        for (float[] s : stars) point(s[0], s[1], s[2]);
+        // 1. Sahne Hazırlığı
+        pushMatrix();
+        cam.apply();
 
-        // Işıklandırma
-        ambientLight(40, 40, 50);
-        pointLight(255, 210, 120, 0, 0, 0); // Güneş kaynağı
+        noLights();
+        for (int i=0; i<600; i++) {
+            stroke(stars[i][3]); strokeWeight(1); point(stars[i][0], stars[i][1], stars[i][2]);
+        }
 
-        // GÜNEŞ
-        drawBody("SUN", 0, 0, 0, R_SUN, color(255, 200, 50), 0, 0);
+        if (showGrid) drawGrid();
+
+        ambientLight(20, 20, 40);
+        pointLight(255, 230, 180, 0, 0, 0);
+        lightFalloff(1.0f, 0.0f, 0.000001f);
+
+        // GÜNEŞ (Kendi Işığı)
+        pushMatrix();
+        noLights(); emissive(255, 200, 50); fill(255, 200, 50); noStroke();
+        sphere(60);
+        sunSX = screenX(0,0,0); sunSY = screenY(0,0,0);
+        emissive(0); lights();
+        popMatrix();
+
+        // ASTEROIDLER
+        noLights(); stroke(150, 80); 
+        for (Asteroid a : belt) a.display(time.totalDays);
+        lights();
 
         // GEZEGENLER
-        drawPlanet("MERCURY", D_MERCURY, S_MERCURY, R_MERCURY, color(169), I_MERCURY, 58.6f);
-        drawPlanet("VENUS", D_VENUS, S_VENUS, R_VENUS, color(255, 240, 180), I_VENUS, -243.0f);
-        drawPlanet("EARTH", D_EARTH, S_EARTH, R_EARTH, color(70, 130, 180), I_EARTH, 1.0f);
-        drawPlanet("MARS", D_MARS, S_MARS, R_MARS, color(188, 74, 60), I_MARS, 1.03f);
-        drawPlanet("JUPITER", D_JUPITER, S_JUPITER, R_JUPITER, color(200, 160, 100), I_JUPITER, 0.41f);
-        drawPlanet("SATURN", D_SATURN, S_SATURN, R_SATURN, color(210, 180, 100), I_SATURN, 0.44f);
-        drawPlanet("URANUS", D_URANUS, S_URANUS, R_URANUS, color(100, 200, 210), I_URANUS, -0.72f);
-        drawPlanet("NEPTUNE", D_NEPTUNE, S_NEPTUNE, R_NEPTUNE, color(50, 100, 200), I_NEPTUNE, 0.67f);
+        for (Planet p : planets) {
+            p.update(time.simSpeed);
+            p.display();
+        }
 
-        if (!paused) masterTime += timeStep;
-        drawUI();
-    }
-
-    void drawPlanet(String name, float dist, float speedMult, float size, int col, float incl, float selfRotDays) {
-        PlanetState s = planetStates.get(name);
-        float d = dist + s.distOffset;
-        float angle = masterTime * speedMult + s.angleOffset;
-
-        // Yörünge Çizimi
-        pushMatrix();
-        rotateZ(incl); noFill(); stroke(255, 30); strokeWeight(1);
-        beginShape();
-        for (float a=0; a<TWO_PI; a+=0.05) vertex(cos(a)*d, 0, sin(a)*d);
-        endShape(CLOSE);
         popMatrix();
 
-        // Pozisyon Hesaplama
-        float px = cos(incl) * cos(angle) * d;
-        float py = sin(incl) * cos(angle) * d;
-        float pz = sin(angle) * d;
-
-        drawBody(name, px, py, pz, size, col, selfRotDays, s.scale);
-
-        // Uydular ve Özel Yapılar
-        pushMatrix();
-        translate(px, py, pz);
-        if (name.equals("EARTH")) drawSatellite(30, 27.3f, 2, color(180), masterTime);
-        if (name.equals("MARS")) {
-            drawSatellite(10, 0.32f, 1, color(150), masterTime);
-            drawSatellite(15, 1.26f, 1, color(140), masterTime * 0.8f);
-        }
-        if (name.equals("JUPITER")) {
-            drawSatellite(55, 1.77f, 2, color(255, 255, 200), masterTime);
-            drawSatellite(70, 3.55f, 2, color(200, 255, 255), masterTime * 0.5f);
-            drawSatellite(90, 7.15f, 3, color(200, 200, 180), masterTime * 0.3f);
-        }
-        if (name.equals("SATURN")) {
-            drawSaturnRings(size);
-            drawSatellite(60, 15.9f, 3, color(230, 200, 150), masterTime * 0.1f);
-        }
-        if (name.equals("NEPTUNE")) drawSatellite(35, -5.88f, 2, color(200), masterTime); // Retrograd Triton
-        popMatrix();
+        // 2. 2D Overlay (Glow & UI)
+        drawOverlays();
     }
 
-    void drawBody(String name, float x, float y, float z, float size, int col, float rotPeriod, float localScale) {
-        screenPosMap.get(name).set(screenX(x, y, z), screenY(x, y, z), screenZ(x, y, z));
-        pushMatrix();
-        translate(x, y, z);
-        if (rotPeriod != 0) rotateY(masterTime * (365.0f / rotPeriod));
-        scale(localScale == 0 ? 1.0f : localScale);
+    void drawOverlays() {
+        hint(DISABLE_DEPTH_TEST);
+        camera(); // UI için 2D moda geç
         
-        noStroke();
-        if (name.equals("SUN")) {
-            // Simple bright light yellow Sun
-            emissive(255, 255, 100);
-            fill(255, 255, 180);
-            noStroke();
-            sphere(size);
-            emissive(0);
-        } else {
-            fill(col);
-            sphere(size);
+        // Güneş Halo Efekti
+        noFill();
+        for(int i = 1; i <= 4; i++) {
+            stroke(255, 200, 50, 60.0f/i);
+            strokeWeight(i * 3);
+            ellipse(sunSX, sunSY, 100*i*0.6f, 100*i*0.6f);
         }
-        
-        if (selectedPlanet.equals(name)) {
-            noFill(); stroke(255, 255, 0); strokeWeight(2); box(size * 2.5f);
-        }
-        popMatrix();
-    }
 
-    void drawSatellite(float d, float p, float sz, int c, float t) {
-        float ang = t * (365.0f / p);
-        pushMatrix();
-        translate(cos(ang)*d, 0, sin(ang)*d);
-        fill(c); noStroke(); sphere(sz);
-        popMatrix();
-    }
-
-    void drawSaturnRings(float r) {
-        noFill(); stroke(150, 130, 100, 80); strokeWeight(2);
-        rotateX(radians(26.7f));
-        for (float i = r * 1.2f; i < r * 2.3f; i += 2) {
-            beginShape();
-            for (float a = 0; a < TWO_PI; a += 0.2) vertex(cos(a)*i, 0, sin(a)*i);
-            endShape(CLOSE);
+        // Seçim Vurgusu (Sarı Halka)
+        if (selectedBody != null) {
+            stroke(255, 220, 0); strokeWeight(2); noFill();
+            if (selectedBody instanceof Planet) {
+                Planet p = (Planet) selectedBody;
+                ellipse(p.sx, p.sy, p.size*5, p.size*5);
+                drawInfoPanel(p);
+            } else {
+                ellipse(sunSX, sunSY, 150, 150);
+            }
         }
-    }
 
-    void drawUI() {
-        hint(DISABLE_DEPTH_TEST); camera(); noLights();
-        fill(0, 180); rect(10, 10, 320, 190);
-        fill(255); textSize(12);
-        text("ASTRONOMIC SIMULATION v3.0", 20, 30);
-        text("FPS: " + (int)frameRate + " | SELECTED: " + selectedPlanet, 20, 50);
-        if (!selectedPlanet.equals("NONE")) {
-            PlanetState s = planetStates.get(selectedPlanet);
-            text(String.format("Dist Offset: %.0f | Scale: %.2f", s.distOffset, s.scale), 20, 75);
-            text("Rel. Velocity: " + (paused ? "0 (PAUSED)" : "30 Days / Sec"), 20, 95);
-        }
-        text("Drag L-Mouse: Rotate View | Scroll: Zoom", 20, 125);
-        text("SPACE: Play/Pause | U: Undo (10 Steps)", 20, 145);
-        text("ARROWS: Dist Offset | W/S: Local Scale", 20, 165);
+        drawSpeedPanel();
+        drawLegend();
         hint(ENABLE_DEPTH_TEST);
     }
 
-    public void mouseDragged() {
-        camRotY += (mouseX - pmouseX) * 0.01f;
-        camRotX = constrain(camRotX + (mouseY - pmouseY) * 0.01f, 0.1f, PI - 0.1f);
+    void drawInfoPanel(Planet p) {
+        fill(uiBG); stroke(uiBorder); rect(20, 20, 260, 280, 8);
+        fill(accent); textSize(16); text("● " + p.name.toUpperCase(), 40, 50);
+        stroke(uiBorder); line(30, 60, 270, 60);
+        fill(uiText); textSize(12);
+        text("Yörünge: " + p.realOrbit, 40, 85);
+        text("Çap: " + p.realDiam + " km", 40, 105);
+        text("Periyot: " + p.realPeriod + " gün", 40, 125);
+        text("Uydu Sayısı: " + p.moons.length, 40, 145);
+        
+        line(30, 165, 270, 165);
+        text("Homojen Dönüşüm Matrisi (3x3):", 40, 185);
+        float a = p.angle;
+        text(String.format("[ %.2f  %.2f  %.0f ]", cos(a), -sin(a), p.sx), 45, 210);
+        text(String.format("[ %.2f  %.2f  %.0f ]", sin(a),  cos(a), p.sy), 45, 230);
+        text("[ 0.00  0.00  1.00 ]", 45, 250);
     }
 
-    public void mouseWheel(MouseEvent event) { camDist = constrain(camDist + event.getCount() * 50, 200, 6000); }
+    void drawSpeedPanel() {
+        int sw = 280, sh = 10, sx = width/2 - sw/2, sy = height - 50;
+        fill(uiBG); stroke(uiBorder); rect(width/2-200, height-80, 400, 60, 30);
+        
+        fill(50); noStroke(); rect(sx, sy, sw, sh, 5);
+        float progress = map(log10(time.simSpeed / 0.1f), 0, log10(500), 0, sw);
+        fill(accent); rect(sx, sy, progress, sh, 5);
+        
+        fill(uiText); textAlign(CENTER);
+        text("SPEED: " + nf(time.simSpeed, 1, 1) + "x  |  " + time.getDateString(), width/2, sy - 10);
+        textAlign(LEFT);
+    }
+
+    float log10(float x) { return log(x) / log(10); }
+
+    void drawLegend() {
+        fill(uiBG); rect(width-200, 20, 180, 140, 8);
+        fill(uiText); textSize(11);
+        text("SPACE : Pause", width-185, 45);
+        text("F / T : Focus / Follow", width-185, 65);
+        text("+/-   : Speed Adjust", width-185, 85);
+        text("ESC   : Reset View", width-185, 105);
+        text("G     : Grid Toggle", width-185, 125);
+    }
+
+    void drawGrid() {
+        stroke(255, 20); strokeWeight(1);
+        for(int i=-1000; i<=1000; i+=100) { line(i, 0, -1000, i, 0, 1000); line(-1000, 0, i, 1000, 0, i); }
+        stroke(255, 0, 0, 100); line(0,0,0, 200,0,0); // X
+        stroke(0, 255, 0, 100); line(0,0,0, 0,200,0); // Y
+        stroke(0, 0, 255, 100); line(0,0,0, 0,0,200); // Z
+    }
 
     public void mousePressed() {
-        selectedPlanet = "NONE"; float bestZ = 1.0f;
-        for (String name : planetStates.keySet()) {
-            PVector p = screenPosMap.get(name);
-            if (dist(mouseX, mouseY, p.x, p.y) < 40 && p.z < bestZ) {
-                selectedPlanet = name; bestZ = p.z;
+        int sx = width/2 - 140, sy = height - 55, sw = 280;
+        if (mouseX >= sx-20 && mouseX <= sx+sw+20 && mouseY >= sy-20 && mouseY <= sy+20) {
+            isDraggingSlider = true;
+            updateSpeed();
+            return;
+        }
+
+        selectedBody = null;
+        float minDist = 50;
+        for (Planet p : planets) {
+            float d = dist(mouseX, mouseY, p.sx, p.sy);
+            if (d < max(p.size * 3, 30)) { selectedBody = p; minDist = d; }
+        }
+        if (dist(mouseX, mouseY, sunSX, sunSY) < 50) selectedBody = "SUN";
+        
+        if (mouseEvent.getCount() == 2 && selectedBody instanceof Planet) cam.focusOn((Planet)selectedBody);
+    }
+
+    public void mouseDragged() {
+        if (isDraggingSlider) { updateSpeed(); return; }
+        if (mouseButton == LEFT) {
+            cam.targetRotY += (mouseX - pmouseX) * 0.01f;
+            cam.targetRotX = constrain(cam.targetRotX + (mouseY - pmouseY) * 0.01f, -PI/2.1f, PI/2.1f);
+        } else cam.pan(mouseX - pmouseX, mouseY - pmouseY);
+    }
+
+    public void mouseReleased() { isDraggingSlider = false; }
+    
+    void updateSpeed() {
+        float t = constrain((mouseX - (width/2 - 140)) / 280.0f, 0, 1);
+        time.simSpeed = 0.1f + t * 49.9f;
+    }
+
+    public void mouseWheel(MouseEvent e) { cam.zoom(e.getCount()); }
+
+    public void keyPressed() {
+        if (key == ' ') time.paused = !time.paused;
+        if (key == 'g' || key == 'G') showGrid = !showGrid;
+        if (key == '+' || key == '=') time.simSpeed = min(50, time.simSpeed + 0.5f);
+        if (key == '-' || key == '_') time.simSpeed = max(0.1f, time.simSpeed - 0.5f);
+        if (key == ESC) { selectedBody = null; cam.reset(); key = 0; }
+        if (key == 'f' && selectedBody instanceof Planet) cam.focusOn((Planet)selectedBody);
+    }
+
+    class Planet {
+        String name, realOrbit, realDiam, realPeriod; 
+        float orbitRadius, size, angle, speed, inclination; int col;
+        Moon[] moons; float wx, wy, wz, sx, sy, localScale = 1.0f;
+
+        Planet(String n, float orb, float s, int c, float spd, float inc, int mCount, String ro, String rd, String rp) {
+            name = n; orbitRadius = orb; size = s; col = c; speed = spd; inclination = inc;
+            moons = new Moon[mCount]; realOrbit = ro; realDiam = rd; realPeriod = rp;
+        }
+
+        void update(float simSpeed) {
+            if (!time.paused) angle += speed * simSpeed * 0.1f;
+            float r = orbitRadius;
+            wx = cos(angle) * r;
+            wy = sin(inclination) * sin(angle) * r;
+            wz = sin(angle) * r;
+            sx = screenX(wx, wy, wz); sy = screenY(wx, wy, wz);
+        }
+
+        void display() {
+            noFill(); stroke(255, 30);
+            beginShape();
+            for(int i=0; i<=360; i+=5) {
+                float a = radians(i);
+                vertex(cos(a)*orbitRadius, sin(inclination)*sin(a)*orbitRadius, sin(a)*orbitRadius);
             }
+            endShape();
+            pushMatrix();
+            translate(wx, wy, wz); specular(50); shininess(10); fill(col); noStroke();
+            scale(localScale); sphere(size);
+            for (Moon m : moons) m.display(time.paused, time.simSpeed);
+            popMatrix();
         }
     }
 
-    public void keyPressed() {
-        if (key == ' ') paused = !paused;
-        if (key == 'u' || key == 'U') undo();
-        if (selectedPlanet.equals("NONE")) return;
-        saveState();
-        PlanetState s = planetStates.get(selectedPlanet);
-        if (keyCode == UP) s.distOffset += 10; if (keyCode == DOWN) s.distOffset -= 10;
-        if (key == 'w' || key == 'W') s.scale += 0.1f; if (key == 's' || key == 'S') s.scale = max(0.1f, s.scale - 0.1f);
+    class Moon {
+        String name; float orbitRadius, size, angle, speed; int col;
+        Moon(String n, float orb, float s, int c, float spd) {
+            name = n; orbitRadius = orb; size = s; col = c; speed = spd; angle = random(TWO_PI);
+        }
+        void display(boolean p, float s) {
+            if(!p) angle += speed * s * 0.2f;
+            pushMatrix();
+            translate(cos(angle)*orbitRadius, 0, sin(angle)*orbitRadius);
+            fill(col); sphere(size);
+            popMatrix();
+        }
     }
 
-    void saveState() {
-        Map<String, PlanetState> snap = new HashMap<>();
-        for (var e : planetStates.entrySet()) snap.put(e.getKey(), e.getValue().copy());
-        undoStack.push(snap); if (undoStack.size() > 10) undoStack.removeLast();
+    class Asteroid {
+        float orbit = random(300, 360), angle = random(TWO_PI), speed = random(0.001f, 0.004f), inc = random(-0.1f, 0.1f);
+        void display(float t) {
+            float a = angle + t * speed; 
+            point(cos(a)*orbit, sin(inc)*sin(a)*orbit, sin(a)*orbit);
+        }
     }
 
-    void undo() { if (!undoStack.isEmpty()) planetStates = undoStack.pop(); }
+    class Camera {
+        float rotX = 0.4f, rotY = 0, zoom = 1.0f, targetRotX = 0.4f, targetRotY = 0, targetZoom = 1.0f;
+        PVector focus = new PVector(0,0,0), targetFocus = new PVector(0,0,0);
+        void update() {
+            rotX = lerp(rotX, targetRotX, 0.1f); rotY = lerp(rotY, targetRotY, 0.1f);
+            zoom = lerp(zoom, targetZoom, 0.1f); focus.lerp(targetFocus, 0.1f);
+        }
+        void apply() {
+            translate(width/2, height/2, 0); scale(zoom); rotateX(rotX); rotateY(rotY);
+            translate(-focus.x, -focus.y, -focus.z);
+        }
+        void focusOn(Planet p) { targetFocus.set(p.wx, p.wy, p.wz); targetZoom = 2.5f; }
+        void reset() { targetFocus.set(0,0,0); targetZoom = 1.0f; targetRotX = 0.4f; }
+        void zoom(float d) { targetZoom = constrain(targetZoom - d*0.05f, 0.2f, 10); }
+        void pan(float dx, float dy) { targetFocus.add(dx, dy, 0); }
+    }
+
+    class TimeSystem {
+        float simSpeed = 1.0f, totalDays = 0; boolean paused = false;
+        void update() { if(!paused) totalDays += simSpeed * 0.1f; }
+        String getDateString() {
+            int y = 2025 + (int)(totalDays/365);
+            return "DATE: " + y + "/" + nf((int)((totalDays%365)/30)+1, 2) + "/" + nf((int)(totalDays%30)+1, 2);
+        }
+    }
 
     public static void main(String[] args) { PApplet.main("SolarSystem"); }
 }
